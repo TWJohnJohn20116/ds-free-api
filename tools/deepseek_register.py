@@ -426,9 +426,14 @@ def main() -> int:
                 );
                 """
             )
+            # Persistent profiles can restore tabs from a previous fallback run.
+            # Close them so a stale forgot_password page cannot be mistaken for this run.
+            for restored_page in list(context.pages):
+                restored_page.close()
             inbox_page = context.new_page()
             email = obtain_email(inbox_page, options)
             deepseek_page = context.new_page()
+            deepseek_page.bring_to_front()
             if options.use_forgot_password_fallback:
                 register_deepseek(deepseek_page, inbox_page, options, email, pwd)
             else:
