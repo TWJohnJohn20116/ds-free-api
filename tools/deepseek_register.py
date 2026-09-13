@@ -79,6 +79,62 @@ def click_text(page: Page, patterns: list[str]) -> bool:
     return False
 
 
+def click_verification_button(page: Page) -> bool:
+    """Click the send-code control even when its label is nested or localized."""
+    if click_text(page, [
+        r"send\s*(?:verification\s*)?code",
+        r"get\s*(?:verification\s*)?code",
+        r"verification\s*code",
+        r"[\u53d1\u9001\u83b7\u53d6\u9a8c\u8bc1\u7801\u9a57\u8b49\u78bc]",
+        r"[\u9a57\u8b49]\s*[\u78bc\u7801]",
+    ]):
+        return True
+
+    controls = page.locator(
+        "button:not([disabled]), [role='button']:not([aria-disabled='true'])"
+    )
+    for index in range(controls.count()):
+        control = controls.nth(index)
+        try:
+            if not control.is_visible(timeout=300):
+                continue
+            label = " ".join(
+                filter(
+                    None,
+                    [
+                        control.inner_text(timeout=300),
+                        control.get_attribute("aria-label"),
+                        control.get_attribute("title"),
+                    ],
+                )
+            ).lower()
+            if any(
+                token in label
+                for token in (
+                    "code", "verification", "verify", "验证码", "驗證碼", "驗證",
+                )
+            ):
+                control.click()
+                return True
+        except PlaywrightTimeoutError:
+            continue
+
+    for selector in (
+        "button[class*='verify']",
+        "button[class*='code']",
+        "[role='button'][class*='verify']",
+        "[role='button'][class*='code']",
+    ):
+        control = page.locator(selector).first
+        try:
+            if control.is_visible(timeout=300):
+                control.click()
+                return True
+        except PlaywrightTimeoutError:
+            continue
+    return False
+
+
 def page_text(page: Page) -> str:
     try:
         return page.locator("body").inner_text(timeout=3000)
@@ -270,7 +326,7 @@ def register_deepseek_with_manual_challenge(
     page.wait_for_timeout(1500)
     click_text(page, [r"sign\s*up", r"register", r"\u8a3b\u518a", r"\u6ce8\u518a"])
     registration_form(page, email, pwd)
-    if not click_text(page, [r"send.*code", r"verification", r"\u9a57\u8b49\u78bc", r"\u9a57\u8b49"]):
+    if not click_verification_button(page):
         raise RuntimeError("Unable to locate the registration verification button")
     if wait_for_environment_error(page) and not wait_for_environment_clear(
         page, options.manual_challenge_timeout
