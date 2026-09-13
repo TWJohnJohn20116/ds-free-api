@@ -18,6 +18,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urljoin
 
 from playwright.sync_api import (
     Browser,
@@ -72,6 +73,25 @@ def page_text(page: Page) -> str:
         return ""
 
 
+def environment_error_visible(page: Page) -> bool:
+    pattern = re.compile(r"当前设备运行环境异常(?:，请尝试更换环境)?")
+    try:
+        if page.get_by_text(pattern).first.is_visible(timeout=500):
+            return True
+    except PlaywrightTimeoutError:
+        pass
+    return bool(pattern.search(page_text(page)))
+
+
+def wait_for_environment_error(page: Page, timeout: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if environment_error_visible(page):
+            return True
+        page.wait_for_timeout(200)
+    return environment_error_visible(page)
+
+
 @dataclass
 class RegisterOptions:
     emailtick_url: str
@@ -123,29 +143,66 @@ def wait_for_code(page: Page, options: RegisterOptions, email: str) -> str:
     raise RuntimeError(f"等待 {email} 的 DeepSeek 验证码超时")
 
 
-def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, email: str, pwd: str) -> None:
-    page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
-    page.wait_for_timeout(1500)
-    click_text(page, [r"立即注册", r"sign\s*up", r"register", r"创建账号"])
+def registration_form(page: Page, email: str, pwd: str) -> tuple[object, object]:
     email_input = first_visible(page, [
         'input[type="email"]', 'input[autocomplete="email"]', 'input[placeholder*="邮箱"]',
         'input[placeholder*="email" i]'
     ])
-    password_input = first_visible(page, [
-        'input[type="password"]', 'input[autocomplete="new-password"]', 'input[placeholder*="密码"]'
-    ])
-    if not email_input or not password_input:
+    password_inputs = page.locator(
+        'input[type="password"], input[autocomplete="new-password"], input[placeholder*="密码"]'
+    )
+    visible_passwords = []
+    for index in range(password_inputs.count()):
+        candidate = password_inputs.nth(index)
+        try:
+            if candidate.is_visible(timeout=700):
+                visible_passwords.append(candidate)
+        except PlaywrightTimeoutError:
+            pass
+    if not email_input or not visible_passwords:
         raise RuntimeError("无法定位 DeepSeek 注册表单；页面结构可能已变化")
     email_input.fill(email)
-    password_input.fill(pwd)
-    confirm = first_visible(page, ['input[autocomplete="new-password"]:nth-of-type(2)', 'input[placeholder*="确认"]'])
-    if confirm:
-        confirm.fill(pwd)
+    visible_passwords[0].fill(pwd)
+    if len(visible_passwords) > 1:
+        visible_passwords[1].fill(pwd)
+    return email_input, visible_passwords[0]
+
+
+def forgot_password_code(page: Page, inbox_page: Page, options: RegisterOptions, email: str) -> str:
+    forgot_url = urljoin(options.deepseek_url, "/forgot_password")
+    page.goto(forgot_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
+    page.wait_for_timeout(800)
+    email_input = first_visible(page, [
+        'input[type="email"]', 'input[autocomplete="email"]', 'input[placeholder*="邮箱"]',
+        'input[placeholder*="手机号"]', 'input[placeholder*="email" i]'
+    ])
+    if not email_input:
+        raise RuntimeError("无法定位忘记密码邮箱输入框；页面结构可能已变化")
+    email_input.fill(email)
+    if not click_text(page, [r"发送验证码", r"send.*code", r"verification"]):
+        raise RuntimeError("无法从忘记密码页面发送验证码")
+    click_text(inbox_page, [r"啟用", r"activate", r"開始接收"])
+    return wait_for_code(inbox_page, options, email)
+
+
+def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, email: str, pwd: str) -> None:
+    page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
+    page.wait_for_timeout(1500)
+    click_text(page, [r"立即注册", r"sign\s*up", r"register", r"创建账号"])
+    registration_form(page, email, pwd)
     if not click_text(page, [r"发送验证码", r"send.*code", r"verification"]):
         raise RuntimeError("无法定位发送验证码按钮")
-    # EmailMux starts polling only after the mailbox is activated.
-    click_text(inbox_page, [r"啟用", r"activate", r"開始接收"])
-    code = wait_for_code(inbox_page, options, email)
+    if wait_for_environment_error(page):
+        print("注册页提示环境异常，改用忘记密码流程获取验证码。", flush=True)
+        code = forgot_password_code(page, inbox_page, options, email)
+        page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
+        page.wait_for_timeout(1000)
+        click_text(page, [r"立即注册", r"sign\s*up", r"register", r"创建账号"])
+        registration_form(page, email, pwd)
+    else:
+        # EmailMux starts polling only after the mailbox is activated.
+        click_text(inbox_page, [r"啟用", r"activate", r"開始接收"])
+        code = wait_for_code(inbox_page, options, email)
     code_input = first_visible(page, ['input[autocomplete="one-time-code"]', 'input[placeholder*="验证码"]', 'input[placeholder*="code" i]'])
     if not code_input:
         raise RuntimeError("无法定位验证码输入框")
