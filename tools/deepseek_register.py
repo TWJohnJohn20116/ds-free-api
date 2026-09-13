@@ -135,6 +135,90 @@ def click_verification_button(page: Page) -> bool:
     return False
 
 
+def _visible_password_count(page: Page) -> int:
+    password_inputs = page.locator(
+        'input[type="password"], input[autocomplete="new-password"]'
+    )
+    visible_count = 0
+    for index in range(password_inputs.count()):
+        try:
+            if password_inputs.nth(index).is_visible(timeout=500):
+                visible_count += 1
+        except PlaywrightTimeoutError:
+            pass
+    return visible_count
+
+
+def open_registration_entry(page: Page, timeout: int = 5000) -> None:
+    """Navigate from the sign-in view to the registration form."""
+    selectors = (
+        "a[href*='sign_up']",
+        "a[href*='signup']",
+        "a[href*='register']",
+        "button",
+        "[role='button']",
+    )
+    text_patterns = (
+        r"\u7acb\u5373\u6ce8\u518a",
+        r"\u6ce8\u518a",
+        r"\u8a3b\u518a",
+        r"sign\s*up",
+        r"register",
+    )
+
+    def registration_visible() -> bool:
+        return _visible_password_count(page) >= 2
+
+    for selector in selectors:
+        controls = page.locator(selector)
+        for index in range(min(controls.count(), 20)):
+            control = controls.nth(index)
+            try:
+                if not control.is_visible(timeout=300):
+                    continue
+                href = control.get_attribute("href") or ""
+                label = " ".join(
+                    filter(
+                        None,
+                        [
+                            control.inner_text(timeout=300),
+                            control.get_attribute("aria-label"),
+                            control.get_attribute("title"),
+                        ],
+                    )
+                )
+                is_registration_link = any(
+                    part in href.lower() for part in ("sign_up", "signup", "register")
+                ) or any(re.search(pattern, label, re.I) for pattern in text_patterns)
+                if not is_registration_link:
+                    continue
+                control.click()
+                page.wait_for_timeout(500)
+                if registration_visible() or "/sign_in" not in page.url.lower():
+                    return
+            except PlaywrightTimeoutError:
+                continue
+
+    for pattern in text_patterns:
+        locator = page.get_by_text(re.compile(pattern, re.I)).first
+        try:
+            if not locator.is_visible(timeout=700):
+                continue
+            locator.click()
+            page.wait_for_timeout(500)
+            if registration_visible() or "/sign_in" not in page.url.lower():
+                return
+        except PlaywrightTimeoutError:
+            continue
+
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() < deadline:
+        if registration_visible() or "/sign_in" not in page.url.lower():
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError("Unable to open the DeepSeek registration form from the sign-in page")
+
+
 def page_text(page: Page) -> str:
     try:
         return page.locator("body").inner_text(timeout=3000)
@@ -260,7 +344,11 @@ def registration_form(page: Page, email: str, pwd: str) -> tuple[object, object]
                 visible_passwords.append(candidate)
         except PlaywrightTimeoutError:
             pass
-    if not email_input or not visible_passwords:
+    if not email_input or len(visible_passwords) < 2:
+        if "/sign_in" in page.url.lower() and len(visible_passwords) < 2:
+            raise RuntimeError(
+                "DeepSeek is still on the sign-in form; registration entry was not opened"
+            )
         raise RuntimeError("无法定位 DeepSeek 注册表单；页面结构可能已变化")
     email_input.fill(email)
     visible_passwords[0].fill(pwd)
@@ -289,7 +377,7 @@ def forgot_password_code(page: Page, inbox_page: Page, options: RegisterOptions,
 def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, email: str, pwd: str) -> None:
     page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
     page.wait_for_timeout(1500)
-    click_text(page, [r"立即注册", r"sign\s*up", r"register", r"创建账号"])
+    open_registration_entry(page)
     registration_form(page, email, pwd)
     if not click_text(page, [r"发送验证码", r"send.*code", r"verification"]):
         raise RuntimeError("无法定位发送验证码按钮")
@@ -304,7 +392,7 @@ def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, em
         code = forgot_password_code(page, inbox_page, options, email)
         page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
         page.wait_for_timeout(1000)
-        click_text(page, [r"立即注册", r"sign\s*up", r"register", r"创建账号"])
+        open_registration_entry(page)
         registration_form(page, email, pwd)
     else:
         # EmailMux starts polling only after the mailbox is activated.
@@ -324,7 +412,7 @@ def register_deepseek_with_manual_challenge(
 ) -> None:
     page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
     page.wait_for_timeout(1500)
-    click_text(page, [r"sign\s*up", r"register", r"\u8a3b\u518a", r"\u6ce8\u518a"])
+    open_registration_entry(page)
     registration_form(page, email, pwd)
     if not click_verification_button(page):
         raise RuntimeError("Unable to locate the registration verification button")
