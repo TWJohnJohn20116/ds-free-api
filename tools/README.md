@@ -35,5 +35,8 @@ python -m playwright install chromium
 just register-account --email-selector 'input[name="email"]' --message-selector '.messages'
 ```
 
+注册页面触发环境风控时，脚本默认不会跳转到 `forgot_password` 验证码页面，而是直接在当前浏览器等待人工完成验证。
+如需启用旧的兜底流程，显式添加 `--forgot-password-fallback`。
+
 脚本没有调用 EmailTick 未公开的私有 API；站点没有稳定公开 API 时，使用网页流程能避免
 把未经验证的接口字段写死。验证码提取仅接受 5 至 8 位数字，并过滤常见年份和占位码。

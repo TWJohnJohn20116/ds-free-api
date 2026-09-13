@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import secrets
 import string
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -21,7 +21,6 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from playwright.sync_api import (
-    Browser,
     BrowserContext,
     Error as PlaywrightError,
     Page,
@@ -32,6 +31,20 @@ from playwright.sync_api import (
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 CODE_RE = re.compile(r"(?<!\d)(\d{5,8})(?!\d)")
+
+
+def generate_browser_fingerprint() -> dict[str, object]:
+    """选择与真实 Chromium 浏览器一致的常见浏览器参数。"""
+    return {
+        "screen": random.choice([
+            {"width": 1920, "height": 1080},
+            {"width": 1366, "height": 768},
+            {"width": 1536, "height": 864},
+            {"width": 1440, "height": 900},
+        ]),
+        "timezone": random.choice(["Asia/Taipei", "Asia/Shanghai", "Asia/Tokyo"]),
+        "locale": "zh-TW",
+    }
 
 
 def make_password(length: int = 14) -> str:
@@ -74,13 +87,27 @@ def page_text(page: Page) -> str:
 
 
 def environment_error_visible(page: Page) -> bool:
+    pattern = re.compile(
+        r"(?:\u5f53\u524d\u8bbe\u5907\u8fd0\u884c\u73af\u5883\u5f02\u5e38|"
+        r"\u73af\u5883\u5f02\u5e38|\u8acb\u9ede\u64ca\u6253\u7834\u5716\u6848|"
+        r"environment\s+(?:verification|error)|captcha)",
+        re.I,
+    )
     pattern = re.compile(r"当前设备运行环境异常(?:，请尝试更换环境)?")
     try:
         if page.get_by_text(pattern).first.is_visible(timeout=500):
             return True
     except PlaywrightTimeoutError:
         pass
-    return bool(pattern.search(page_text(page)))
+    return bool(
+        re.search(
+            r"(?:\u5f53\u524d\u8bbe\u5907\u8fd0\u884c\u73af\u5883\u5f02\u5e38|"
+            r"\u73af\u5883\u5f02\u5e38|\u8acb\u9ede\u64ca\u6253\u7834\u5716\u6848|"
+            r"environment\s+(?:verification|error)|captcha)",
+            page_text(page),
+            re.I,
+        )
+    )
 
 
 def wait_for_environment_error(page: Page, timeout: float = 3.0) -> bool:
@@ -92,6 +119,20 @@ def wait_for_environment_error(page: Page, timeout: float = 3.0) -> bool:
     return environment_error_visible(page)
 
 
+def wait_for_environment_clear(page: Page, timeout: int) -> bool:
+    print(
+        "DeepSeek requires a browser verification. Complete it in the open browser; "
+        f"waiting up to {timeout} seconds.",
+        flush=True,
+    )
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not environment_error_visible(page):
+            return True
+        page.wait_for_timeout(500)
+    return not environment_error_visible(page)
+
+
 @dataclass
 class RegisterOptions:
     emailtick_url: str
@@ -101,6 +142,10 @@ class RegisterOptions:
     headless: bool
     email_selector: str | None
     message_selector: str
+    use_forgot_password_fallback: bool
+    profile_dir: Path
+    browser_channel: str
+    manual_challenge_timeout: int
 
 
 def obtain_email(page: Page, options: RegisterOptions) -> str:
@@ -193,6 +238,12 @@ def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, em
     if not click_text(page, [r"发送验证码", r"send.*code", r"verification"]):
         raise RuntimeError("无法定位发送验证码按钮")
     if wait_for_environment_error(page):
+        if not options.use_forgot_password_fallback:
+            raise RuntimeError(
+                "DeepSeek registration triggered an environment verification challenge; "
+                "forgot_password fallback is disabled. Complete verification in the browser "
+                "or rerun with --forgot-password-fallback."
+            )
         print("注册页提示环境异常，改用忘记密码流程获取验证码。", flush=True)
         code = forgot_password_code(page, inbox_page, options, email)
         page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
@@ -212,6 +263,32 @@ def register_deepseek(page: Page, inbox_page: Page, options: RegisterOptions, em
     page.wait_for_timeout(3000)
 
 
+def register_deepseek_with_manual_challenge(
+    page: Page, inbox_page: Page, options: RegisterOptions, email: str, pwd: str
+) -> None:
+    page.goto(options.deepseek_url, wait_until="domcontentloaded", timeout=options.timeout * 1000)
+    page.wait_for_timeout(1500)
+    click_text(page, [r"sign\s*up", r"register", r"\u8a3b\u518a", r"\u6ce8\u518a"])
+    registration_form(page, email, pwd)
+    if not click_text(page, [r"send.*code", r"verification", r"\u9a57\u8b49\u78bc", r"\u9a57\u8b49"]):
+        raise RuntimeError("Unable to locate the registration verification button")
+    if wait_for_environment_error(page) and not wait_for_environment_clear(
+        page, options.manual_challenge_timeout
+    ):
+        raise RuntimeError("The browser verification was not completed before timeout")
+    click_text(inbox_page, [r"activate", r"\u555f\u7528", r"\u958b\u59cb"])
+    code = wait_for_code(inbox_page, options, email)
+    code_input = first_visible(
+        page, ['input[autocomplete="one-time-code"]', 'input[placeholder*="code" i]', 'input[placeholder*="\u9a57\u8b49"]']
+    )
+    if not code_input:
+        raise RuntimeError("Unable to locate the verification code input")
+    code_input.fill(code)
+    if not click_text(page, [r"sign\s*up", r"create account", r"\u8a3b\u518a", r"\u6ce8\u518a"]):
+        raise RuntimeError("Unable to locate the final registration button")
+    page.wait_for_timeout(3000)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emailtick-url", default="https://emailmux.com/tw/temporary-gmail")
@@ -220,27 +297,86 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--poll-interval", type=int, default=3)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument(
+        "--forgot-password-fallback",
+        action="store_true",
+        help="Enable the legacy forgot_password fallback when registration is challenged",
+    )
+    parser.add_argument(
+        "--profile-dir",
+        type=Path,
+        default=Path(".playwright/deepseek-profile"),
+        help="Persistent browser profile for cookies and device state",
+    )
+    parser.add_argument(
+        "--browser-channel",
+        default="chrome",
+        help="Browser channel to use (default: chrome; use chromium if unavailable)",
+    )
+    parser.add_argument(
+        "--manual-challenge-timeout",
+        type=int,
+        default=180,
+        help="Seconds to wait for manual environment verification",
+    )
     parser.add_argument("--email-selector", default="#email", help="邮箱地址显示元素 CSS selector")
     parser.add_argument("--message-selector", default="body", help="EmailTick 邮件内容 CSS selector")
     args = parser.parse_args()
     options = RegisterOptions(args.emailtick_url, args.deepseek_url, args.timeout, args.poll_interval,
-                              args.headless, args.email_selector, args.message_selector)
+                              args.headless, args.email_selector, args.message_selector,
+                              args.forgot_password_fallback, args.profile_dir,
+                              args.browser_channel, args.manual_challenge_timeout)
     pwd = make_password()
     with sync_playwright() as playwright:
+        options.profile_dir.mkdir(parents=True, exist_ok=True)
+        fingerprint = generate_browser_fingerprint()
+        launch_args = {
+            "user_data_dir": str(options.profile_dir),
+            "headless": options.headless,
+            "slow_mo": 500,
+            "viewport": fingerprint["screen"],
+            "timezone_id": fingerprint["timezone"],
+            "locale": fingerprint["locale"],
+            "color_scheme": random.choice(["light", "dark", "no-preference"]),
+            "extra_http_headers": {
+                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        if options.browser_channel:
+            launch_args["channel"] = options.browser_channel
         try:
-            browser: Browser = playwright.chromium.launch(headless=options.headless)
-        except PlaywrightError as error:
-            if "Executable doesn't exist" not in str(error):
+            context: BrowserContext = playwright.chromium.launch_persistent_context(**launch_args)
+        except PlaywrightError:
+            if options.browser_channel != "chrome":
                 raise
-            print("首次运行正在下载 Playwright Chromium…", file=sys.stderr, flush=True)
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-            browser = playwright.chromium.launch(headless=options.headless)
-        context: BrowserContext = browser.new_context()
+            print("Chrome channel unavailable; falling back to Playwright Chromium.", file=sys.stderr, flush=True)
+            launch_args.pop("channel", None)
+            context = playwright.chromium.launch_persistent_context(**launch_args)
         try:
+            context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['zh-TW', 'zh', 'en-US', 'en']
+                });
+                window.chrome = window.chrome || {runtime: {}, app: {}};
+                const originalQuery = navigator.permissions.query.bind(navigator.permissions);
+                navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications'
+                        ? Promise.resolve({state: Notification.permission})
+                        : originalQuery(parameters)
+                );
+                """
+            )
             inbox_page = context.new_page()
             email = obtain_email(inbox_page, options)
             deepseek_page = context.new_page()
-            register_deepseek(deepseek_page, inbox_page, options, email, pwd)
+            if options.use_forgot_password_fallback:
+                register_deepseek(deepseek_page, inbox_page, options, email, pwd)
+            else:
+                register_deepseek_with_manual_challenge(deepseek_page, inbox_page, options, email, pwd)
             record = {"email": email, "mobile": "", "area_code": "", "password": pwd, "device_id": ""}
             args.output.parent.mkdir(parents=True, exist_ok=True)
             with args.output.open("a", encoding="utf-8") as handle:
@@ -249,7 +385,6 @@ def main() -> int:
             return 0
         finally:
             context.close()
-            browser.close()
 
 
 if __name__ == "__main__":
