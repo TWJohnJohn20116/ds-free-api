@@ -6,6 +6,7 @@ mod admin;
 mod auth;
 mod error;
 mod handlers;
+mod register;
 pub mod runtime_log;
 mod stats;
 mod store;
@@ -51,6 +52,7 @@ pub async fn run(config: Config, config_path: PathBuf) -> anyhow::Result<()> {
     ));
     let stats = Arc::new(stats::Stats::new_with_store(Some(store.clone())));
     let login_limiter = Arc::new(auth::LoginLimiter::new());
+    let registration = Arc::new(register::RegistrationState::new());
     let state = AppState {
         adapter: adapter.clone(),
         anthropic_compat,
@@ -59,6 +61,7 @@ pub async fn run(config: Config, config_path: PathBuf) -> anyhow::Result<()> {
         config_path: config_path.clone(),
         store: store.clone(),
         login_limiter: login_limiter.clone(),
+        registration,
     };
     let router = build_router(state.clone(), cors_origins);
 
@@ -118,6 +121,14 @@ fn build_router(state: AppState, cors_origins: Vec<String>) -> Router {
         .route("/admin/api/config", get(admin::admin_config))
         // Config
         .route("/admin/api/config", put(admin::admin_put_config))
+        .route(
+            "/admin/api/register/start",
+            post(admin::admin_register_start),
+        )
+        .route(
+            "/admin/api/register/status",
+            get(admin::admin_register_status),
+        )
         // Request logs
         .route("/admin/api/logs", get(admin::admin_logs))
         // Runtime logs

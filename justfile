@@ -39,6 +39,10 @@ test-adapter-response *ARGS:
 serve *ARGS:
   (cd web && bun run build) && cargo run -- "$@"
 
+# EmailTick + DeepSeek 自动注册一个账号（首次使用需安装 Playwright Chromium）
+register-account *ARGS:
+  uv run --with "playwright>=1.45,<2" python tools/deepseek_register.py "$@"
+
 # Basic: 基础功能测试（两端点）
 e2e-basic *ARGS:
   cd py-e2e-tests && uv run python runner.py scenarios/basic "$@"

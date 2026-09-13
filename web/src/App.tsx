@@ -9,6 +9,7 @@ import { ModelsPage } from '@/pages/ModelsPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { LogsPage } from '@/pages/LogsPage';
+import { RegisterPage } from '@/pages/RegisterPage';
 import { SplashScreen } from '@/components/SplashScreen';
 
 function ProtectedRoutes() {
@@ -24,6 +25,7 @@ function ProtectedRoutes() {
         <Route path="config" element={<ConfigPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="logs" element={<LogsPage />} />
+        <Route path="register" element={<RegisterPage />} />
       </Route>
     </Routes>
   );

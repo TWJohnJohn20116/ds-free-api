@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use super::handlers::AppState;
 use crate::config::Config;
 
+use super::register::{RegistrationOptions, RegistrationStatus};
+
 // ── 请求/响应类型 ──────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -255,6 +257,33 @@ pub(crate) async fn admin_config(State(state): State<AppState>) -> Response {
     let config = state.config.read().await;
     let config_view = mask_config(&config);
     json_response(&config_view)
+}
+
+/// POST /admin/api/register/start — 启动后台自动注册任务
+pub(crate) async fn admin_register_start(
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> Response {
+    let options = if body.is_empty() {
+        RegistrationOptions::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(error) => {
+                return error_response(StatusCode::BAD_REQUEST, &format!("请求格式错误: {error}"));
+            }
+        }
+    };
+    match state.registration.start(state.clone(), options).await {
+        Ok(status) => json_response(&status),
+        Err(error) => error_response(StatusCode::CONFLICT, &error),
+    }
+}
+
+/// GET /admin/api/register/status — 查询后台自动注册状态
+pub(crate) async fn admin_register_status(State(state): State<AppState>) -> Response {
+    let status: RegistrationStatus = state.registration.snapshot().await;
+    json_response(&status)
 }
 
 /// PUT /admin/api/config — 更新并热重载配置

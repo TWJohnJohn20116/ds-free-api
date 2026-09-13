@@ -5,6 +5,7 @@
     "config": "配置",
     "settings": "设置",
     "logs": "日志",
+    "register": "自动注册",
     "logout": "退出",
     "collapseSidebar": "折叠侧边栏",
     "expandSidebar": "展开侧边栏"

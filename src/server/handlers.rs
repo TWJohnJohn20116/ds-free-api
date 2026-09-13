@@ -151,6 +151,7 @@ pub(crate) struct AppState {
     pub(crate) store: Arc<StoreManager>,
     pub(crate) login_limiter: Arc<LoginLimiter>,
     pub(crate) config_path: PathBuf,
+    pub(crate) registration: Arc<super::register::RegistrationState>,
 }
 struct RequestRecord<'a> {
     request_id: &'a str,

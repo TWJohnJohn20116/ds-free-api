@@ -9,6 +9,7 @@ import {
   ScrollText,
   PanelLeftClose,
   PanelLeftOpen,
+  UserPlus,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -47,6 +48,7 @@ export function Layout() {
     { to: '/models', icon: Boxes, label: t('nav.models') },
     { to: '/config', icon: Sliders, label: t('nav.config') },
     { to: '/logs', icon: ScrollText, label: t('nav.logs') },
+    { to: '/register', icon: UserPlus, label: t('nav.register') },
   ];
 
   // Mobile Bottom Tab Bar Navigation: Core 3 views (Logs and Settings are inside Profile Dropdown)

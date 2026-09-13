@@ -288,6 +288,27 @@ export async function apiFetchModels(): Promise<ModelListResponse> {
   return apiFetch<ModelListResponse>('/admin/api/models');
 }
 
+export interface RegistrationStatus {
+  state: 'idle' | 'running' | 'completed' | 'failed' | string;
+  progress: number;
+  message: string;
+  email: string;
+}
+
+export async function apiStartRegistration(options: {
+  emailtick_url?: string;
+  headless?: boolean;
+} = {}): Promise<RegistrationStatus> {
+  return apiFetch<RegistrationStatus>('/admin/api/register/start', {
+    method: 'POST',
+    body: JSON.stringify(options),
+  });
+}
+
+export async function apiFetchRegistrationStatus(): Promise<RegistrationStatus> {
+  return apiFetch<RegistrationStatus>('/admin/api/register/status');
+}
+
 /** Comprehensive multilingual error localizer for all backend auth & system messages */
 export function localizeAuthError(msg?: string, lang?: string): string {
   if (!msg) return '';

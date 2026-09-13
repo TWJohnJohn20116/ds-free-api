@@ -5,6 +5,7 @@
     "config": "Config",
     "settings": "Settings",
     "logs": "Logs",
+    "register": "Auto Register",
     "logout": "Logout",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar"
