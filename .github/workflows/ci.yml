@@ -78,3 +78,34 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake g++ libclang-dev
       - name: cargo test
         run: cargo test
+
+  build-windows:
+    needs: [build-frontend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download frontend assets
+        uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist/
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: x86_64-pc-windows-msvc
+      - name: Install build dependencies
+        shell: cmd
+        run: |
+          choco install cmake -y
+          choco install strawberryperl -y
+          choco install pkgconfiglite -y
+          choco install llvm -y
+          choco install nasm -y
+      - name: Build Windows release
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ds-free-api-windows-x86_64
+          path: target/x86_64-pc-windows-msvc/release/ds-free-api.exe
+          if-no-files-found: error
