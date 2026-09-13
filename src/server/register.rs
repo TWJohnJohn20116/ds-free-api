@@ -12,6 +12,8 @@ use crate::config::Account;
 
 use super::handlers::AppState;
 
+const REGISTRATION_SCRIPT: &str = include_str!("../../tools/deepseek_register.py");
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RegistrationStatus {
     pub state: String,
@@ -100,11 +102,25 @@ async fn run_registration(
     set_progress(status, 10, "正在启动 EmailMux 与 DeepSeek 页面").await;
     let configured_runner = std::env::var("DS_REGISTER_RUNNER").ok();
     let explicit_runner = configured_runner.is_some();
-    let script =
-        std::env::var("DS_REGISTER_SCRIPT").unwrap_or_else(|_| "tools/deepseek_register.py".into());
-    let output_path = std::env::var("DS_DATA_DIR")
-        .map(|dir| format!("{dir}/registered_accounts.jsonl"))
-        .unwrap_or_else(|_| "registered_accounts.jsonl".into());
+    let data_dir = std::env::var_os("DS_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| app.config_path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let script = match std::env::var_os("DS_REGISTER_SCRIPT") {
+        Some(script) => std::path::PathBuf::from(script),
+        None => {
+            let script_dir = data_dir.join(".ds-free-api");
+            tokio::fs::create_dir_all(&script_dir)
+                .await
+                .map_err(|error| format!("无法准备注册器目录：{error}"))?;
+            let script = script_dir.join("deepseek_register.py");
+            tokio::fs::write(&script, REGISTRATION_SCRIPT)
+                .await
+                .map_err(|error| format!("无法写入内置注册器：{error}"))?;
+            script
+        }
+    };
+    let output_path = data_dir.join("registered_accounts.jsonl");
 
     let runners = configured_runner
         .map(|runner| vec![runner])
@@ -118,7 +134,7 @@ async fn run_registration(
         } else if is_runner(&runner, "py") {
             command.arg("-3");
         }
-        command.arg(&script).args(["--output", &output_path]);
+        command.arg(&script).arg("--output").arg(&output_path);
         if options.headless {
             command.arg("--headless");
         }

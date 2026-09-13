@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.14] - 2026-09-13
+
+### Fixed
+
+- 后台自动注册器改为从程序内嵌脚本启动，并写入配置目录，修复发布包缺少 `tools/deepseek_register.py` 或启动目录变化导致注册失败。
+
 ## [0.2.13] - 2026-09-13
 
 ### Added
