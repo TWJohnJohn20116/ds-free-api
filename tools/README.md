@@ -5,11 +5,18 @@
 
 ## 使用
 
-需要 Python 3.11+、`uv` 和 Chromium：
+需要 Python 3.11+ 和 Chromium。后台会优先使用 `uv`，没有 `uv` 时自动回退到 `python` / `py`；也可以用 `DS_REGISTER_RUNNER` 指定运行程序。
 
 ```powershell
 uv run --with "playwright>=1.45,<2" python tools/deepseek_register.py
 uv run --with "playwright>=1.45,<2" playwright install chromium
+```
+
+没有 `uv` 时先安装依赖：
+
+```powershell
+python -m pip install -r tools/requirements.txt
+python -m playwright install chromium
 ```
 
 默认会显示浏览器窗口。EmailMux 当前可直接访问；若邮箱站点出现 Cloudflare/CAPTCHA，完成后脚本会继续。

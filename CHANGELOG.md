@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.13] - 2026-09-13
+
+### Added
+
+- 后台自动注册器会在没有 `uv` 时自动回退到 `python`、`python3` 或 `py`，并提供依赖安装提示。
+- 自动注册成功后继续热加入账号池并持久化配置。
+
 ## [0.2.10] - 2026-09-13
 
 提示词回归标准 ChatML，去掉容易被上游风控命中的注入特征；同时修复多轮历史缺少生成锚点、

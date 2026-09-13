@@ -1,5 +1,6 @@
 //! 后台自动注册任务：执行 Playwright 注册器并将成功账号热加入账号池。
 
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -97,34 +98,60 @@ async fn run_registration(
     status: &Arc<RwLock<RegistrationStatus>>,
 ) -> Result<Account, String> {
     set_progress(status, 10, "正在启动 EmailMux 与 DeepSeek 页面").await;
-    let runner = std::env::var("DS_REGISTER_RUNNER").unwrap_or_else(|_| "uv".into());
+    let configured_runner = std::env::var("DS_REGISTER_RUNNER").ok();
+    let explicit_runner = configured_runner.is_some();
     let script =
         std::env::var("DS_REGISTER_SCRIPT").unwrap_or_else(|_| "tools/deepseek_register.py".into());
     let output_path = std::env::var("DS_DATA_DIR")
         .map(|dir| format!("{dir}/registered_accounts.jsonl"))
         .unwrap_or_else(|_| "registered_accounts.jsonl".into());
 
-    let mut command = Command::new(&runner);
-    if runner.eq_ignore_ascii_case("uv") {
-        command.args(["run", "--with", "playwright>=1.45,<2", "python"]);
+    let runners = configured_runner
+        .map(|runner| vec![runner])
+        .unwrap_or_else(|| vec!["uv".into(), "python".into(), "python3".into(), "py".into()]);
+    let mut output = None;
+    let mut selected_runner = String::new();
+    for runner in runners {
+        let mut command = Command::new(&runner);
+        if is_runner(&runner, "uv") {
+            command.args(["run", "--with", "playwright>=1.45,<2", "python"]);
+        } else if is_runner(&runner, "py") {
+            command.arg("-3");
+        }
+        command.arg(&script).args(["--output", &output_path]);
+        if options.headless {
+            command.arg("--headless");
+        }
+        if let Some(url) = options.emailtick_url.as_deref() {
+            command.args(["--emailtick-url", url]);
+        }
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        match command.output().await {
+            Ok(result) => {
+                output = Some(result);
+                selected_runner = runner;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !explicit_runner => {
+                continue;
+            }
+            Err(error) => return Err(format!("无法启动注册器 {runner}: {error}")),
+        }
     }
-    command.arg(&script).args(["--output", &output_path]);
-    if options.headless {
-        command.arg("--headless");
-    }
-    if let Some(url) = options.emailtick_url.as_deref() {
-        command.args(["--emailtick-url", url]);
-    }
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    let output = command
-        .output()
-        .await
-        .map_err(|error| format!("无法启动注册器 {runner}: {error}"))?;
+    let output = output.ok_or_else(|| {
+        "找不到注册器运行环境，请安装 uv 或 Python 3.11+（并安装 Playwright）".to_string()
+    })?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
-        return Err(format!("注册器退出失败：{}", tail(&stderr)));
+        let details = tail(&stderr);
+        if details.contains("No module named") && details.contains("playwright") {
+            return Err(
+                "Python 缺少 Playwright，请执行：python -m pip install -r tools/requirements.txt"
+                    .into(),
+            );
+        }
+        return Err(format!("注册器退出失败（{selected_runner}）：{details}"));
     }
     set_progress(status, 80, "注册器完成，正在导入账号池").await;
     let account = stdout
@@ -151,6 +178,13 @@ async fn run_registration(
     };
     app.adapter.sync_accounts(&accounts).await;
     Ok(account)
+}
+
+fn is_runner(value: &str, name: &str) -> bool {
+    Path::new(value)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case(name))
 }
 
 fn tail(value: &str) -> String {

@@ -1,6 +1,6 @@
 [package]
 name = "ds_core"
-version = "0.2.10"
+version = "0.2.13"
 edition = "2024"
 
 [lints]
