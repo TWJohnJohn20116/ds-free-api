@@ -7,6 +7,7 @@
 
 后台面板使用的注册脚本已嵌入程序；启动时写入配置文件所在目录的 `.ds-free-api` 子目录，
 因此不依赖从哪个工作目录启动，也不要求发布包额外携带 `tools/` 文件夹。
+Windows 发布包同时包含 `playwright-browsers/`，请保持该目录与 `ds-free-api.exe` 同级。
 
 需要 Python 3.11+ 和 Chromium。后台会优先使用 `uv`，没有 `uv` 时自动回退到 `python` / `py`；也可以用 `DS_REGISTER_RUNNER` 指定运行程序。
 

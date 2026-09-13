@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.16] - 2026-09-13
+
+### Added
+
+- Windows 发布包内置 Playwright Chromium，并自动设置浏览器目录，首次注册无需另行下载浏览器。
+
+## [0.2.15] - 2026-09-13
+
+### Fixed
+
+- 注册器首次运行会自动下载缺失的 Playwright Chromium，并统一使用 UTF-8 输出，避免 Windows 编码乱码。
+
 ## [0.2.14] - 2026-09-13
 
 ### Fixed

@@ -134,6 +134,16 @@ async fn run_registration(
         } else if is_runner(&runner, "py") {
             command.arg("-3");
         }
+        command.env("PYTHONIOENCODING", "utf-8");
+        if std::env::var_os("PLAYWRIGHT_BROWSERS_PATH").is_none()
+            && let Ok(executable) = std::env::current_exe()
+            && let Some(parent) = executable.parent()
+        {
+            let bundled_browsers = parent.join("playwright-browsers");
+            if bundled_browsers.is_dir() {
+                command.env("PLAYWRIGHT_BROWSERS_PATH", bundled_browsers);
+            }
+        }
         command.arg(&script).arg("--output").arg(&output_path);
         if options.headless {
             command.arg("--headless");

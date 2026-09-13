@@ -13,12 +13,20 @@ import json
 import re
 import secrets
 import string
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Error as PlaywrightError,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
+)
 
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
@@ -162,7 +170,14 @@ def main() -> int:
                               args.headless, args.email_selector, args.message_selector)
     pwd = make_password()
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=options.headless)
+        try:
+            browser: Browser = playwright.chromium.launch(headless=options.headless)
+        except PlaywrightError as error:
+            if "Executable doesn't exist" not in str(error):
+                raise
+            print("首次运行正在下载 Playwright Chromium…", file=sys.stderr, flush=True)
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+            browser = playwright.chromium.launch(headless=options.headless)
         context: BrowserContext = browser.new_context()
         try:
             inbox_page = context.new_page()
