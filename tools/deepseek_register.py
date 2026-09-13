@@ -211,6 +211,17 @@ def open_registration_entry(page: Page, timeout: int = 5000) -> None:
         except PlaywrightTimeoutError:
             continue
 
+    # Some builds render the sign-up link only after hydration, or intercept
+    # the click without exposing a usable href. Try the known routes directly.
+    for route in ("/sign_up", "/signup", "/register"):
+        try:
+            page.goto(urljoin(page.url, route), wait_until="domcontentloaded", timeout=timeout)
+            page.wait_for_timeout(700)
+            if registration_visible() or "/sign_in" not in page.url.lower():
+                return
+        except PlaywrightError:
+            continue
+
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         if registration_visible() or "/sign_in" not in page.url.lower():
