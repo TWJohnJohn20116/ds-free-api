@@ -233,7 +233,6 @@ def environment_error_visible(page: Page) -> bool:
         r"environment\s+(?:verification|error)|captcha)",
         re.I,
     )
-    pattern = re.compile(r"当前设备运行环境异常(?:，请尝试更换环境)?")
     try:
         if page.get_by_text(pattern).first.is_visible(timeout=500):
             return True
