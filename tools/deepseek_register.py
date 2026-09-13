@@ -79,6 +79,28 @@ def click_text(page: Page, patterns: list[str]) -> bool:
     return False
 
 
+def new_context_page(
+    context: BrowserContext, retries: int = 3, avoid_page: Page | None = None
+) -> Page:
+    """Create a tab, reusing a restored tab when Chromium rejects Target.createTarget."""
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return context.new_page()
+        except PlaywrightError as exc:
+            last_error = exc
+            open_pages = [
+                page
+                for page in context.pages
+                if not page.is_closed() and page is not avoid_page
+            ]
+            if open_pages:
+                return open_pages[-1]
+            if attempt + 1 < retries:
+                time.sleep(1)
+    raise RuntimeError(f"Unable to create a browser tab: {last_error}")
+
+
 def click_verification_button(page: Page) -> bool:
     """Click the send-code control even when its label is nested or localized."""
     if click_text(page, [
@@ -524,13 +546,17 @@ def main() -> int:
                 );
                 """
             )
-            # Persistent profiles can restore tabs from a previous fallback run.
-            # Close them so a stale forgot_password page cannot be mistaken for this run.
-            for restored_page in list(context.pages):
-                restored_page.close()
-            inbox_page = context.new_page()
+            # Keep one restored tab alive; closing every tab can make Chrome reject
+            # the next Target.createTarget call on Windows.
+            restored_pages = [page for page in context.pages if not page.is_closed()]
+            inbox_page = restored_pages[0] if restored_pages else new_context_page(context)
+            for restored_page in restored_pages[1:]:
+                try:
+                    restored_page.close()
+                except PlaywrightError:
+                    pass
             email = obtain_email(inbox_page, options)
-            deepseek_page = context.new_page()
+            deepseek_page = new_context_page(context, avoid_page=inbox_page)
             deepseek_page.bring_to_front()
             if options.use_forgot_password_fallback:
                 register_deepseek(deepseek_page, inbox_page, options, email, pwd)
